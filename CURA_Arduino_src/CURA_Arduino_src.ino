@@ -5,6 +5,9 @@
 #include <SD.h>       // Include the SD card library
 #include <WiFi.h> // For ESP32, use <ESP8266WiFi.h> for ESP8266
 #include <HTTPClient.h>
+//#include <M5Unified.h>
+//#include <M5GFX.H>
+#include "CuraImage.h"
 
 #define BLYNK_TEMPLATE_ID "TMPL2ieuJcx5l"
 #define BLYNK_TEMPLATE_NAME "CURA Health Watch"
@@ -23,7 +26,6 @@ int zero = 0; // Generate a random value
 int one = 1; // Generate a random value
 
 
-#include <BlynkSimpleEsp32.h> // For ESP32, use <BlynkSimpleEsp8266.h> for ESP8266
 
  ButtonColors on_clrs = { BLACK, WHITE, WHITE }; // Text color, outline color, fill color when pressed
  ButtonColors Alert_clrs = { RED, WHITE, WHITE };
@@ -32,12 +34,19 @@ int one = 1; // Generate a random value
  ButtonColors off_mode = { BLACK, WHITE, WHITE }; // Text color, outline color, fill color when not pressed
  PulseOximeter HR_SP;    //This creates a HR/SPo2 object
 
+
+#include <BlynkSimpleEsp32.h> // For ESP32, use <BlynkSimpleEsp8266.h> for ESP8266
+
 RTC_TimeTypeDef RTC_TimeStruct; // Structure to hold time data
 RTC_DateTypeDef RTC_DateStruct; // Structure to hold date data
 
 Adafruit_MLX90614 mlx;
 
-//Function prototypes//
+/* ================================================================
+=========================== Function prototypes ===================
+=================================================================== */
+ 
+
 void Cura_SettingBtnA();
 void Cura_SettingBtnB();
 void Cura_SettingBtnC();
@@ -46,32 +55,58 @@ void tempbtn_funct();
 void SPO2btn_funct();
 
 
+
+
+/* ================================================================
+============================== Variables ==========================
+=================================================================== */
+
+
   // Variables for storing heart rate, temp and SpO2
 uint32_t tsLastReport = 0;
 const int REPORTING_PERIOD_MS = 1000; // Report every 1 second
 uint32_t TempF;    //VARIABLE FOR STORING TEMPERATURE
+int Current_Mode;
 
 Button Alerted_HelpButton(5, 4, 311, 230, false, "Alerted Help!!!", Alert_clrs, on_clrs, MC_DATUM );
     // (x, y, width, height, isToggle, label, off_colors, on_colors, datum)
 Button HelpButton(5, 4, 311, 230, false, "Press for Help", off_clrs, on_clrs, MC_DATUM );
-Button ModeOn_Button(5, 4, 311, 230, false, "Fall Detect On", off_clrs, on_clrs, MC_DATUM );
-Button ModeOff_Button(5, 4, 311, 230, false, "Fall Detect Off", off_mode, on_clrs, MC_DATUM );
+//Button ModeOn_Button(5, 4, 311, 230, false, "Fall Detect On", off_clrs, on_clrs, MC_DATUM );
+//Button ModeOff_Button(5, 4, 311, 230, false, "Fall Detect Off", off_mode, on_clrs, MC_DATUM );
+
+
+
+
+
+/* ===============================================================
+======================= System setup =============================
+================================================================== */
+
 
 
 void setup() {
   M5.begin(); // Initialize M5Stack Core2
+  M5.Rtc.begin(); // Initialize the RTC module
   M5.Lcd.setTextFont(2); // Set a suitable font for display
   M5.Lcd.setTextSize(2); // Set text size
-  M5.Lcd.setTextColor(WHITE, BLACK); // Set text color to white on black background
+  M5.Lcd.setTextColor(WHITE, BLACK); // Set text color to black on white background
 
 }
 
 
 
+
+/* ================================================================
+========================== Main code ==============================
+=================================================================== */
+
 void loop() {
 
   setup();
   M5.update(); // Update button and touch states
+
+
+  M5.Lcd.pushImage(0, 0, HEART2_WIDTH, HEART2_HEIGHT, (uint8_t*)Heart2);
 
   M5.Rtc.GetTime(&RTC_TimeStruct); // Get current time from RTC
   M5.Rtc.GetDate(&RTC_DateStruct); // Get current date from RTC
@@ -83,7 +118,11 @@ void loop() {
 
 //button A settings menu and functions
 if (M5.BtnA.wasPressed()) {
-    
+   
+   M5.Axp.SetVibration(200);
+   delay(100);
+   M5.Axp.SetVibration(0);
+
    Cura_SettingBtnA();
 
 }
@@ -91,17 +130,23 @@ if (M5.BtnA.wasPressed()) {
 //button B settings menu and functions
 if (M5.BtnB.wasPressed()) {
     
-   Cura_SettingBtnB();
+   M5.Axp.SetVibration(200);
+   delay(100);
+   M5.Axp.SetVibration(0);
+
+   //Cura_SettingBtnB();
 
 }
 
 if (M5.BtnC.wasPressed()) {
     
+   M5.Axp.SetVibration(200);
+   delay(100);
+   M5.Axp.SetVibration(0);
+
    Cura_SettingBtnC();
 
 }
-
-
   delay(10); // Small delay for stability
 }
 
@@ -110,9 +155,10 @@ if (M5.BtnC.wasPressed()) {
 
 
 
-///////////////////////////////////////////////FUNCTION DEFINITIONS///////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/* ===============================================================
+========================== FUNCTION DEFINITIONS ==================
+================================================================== */
+
 
 void Cura_SettingBtnA(){
 
@@ -141,6 +187,11 @@ void Cura_SettingBtnA(){
 
     ////////////////Calls for Heart Rate function if HeartButton touch button pressed//////////////////////////////////////////////////////////////////////////////////////////////////////
     if (HeartButton.wasPressed()) {
+
+         M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
       Heartbtn_funct();
 
     break;  
@@ -149,7 +200,12 @@ void Cura_SettingBtnA(){
 
   ////////////////Calls for SP02 function if SP02 touch button pressed/////////////////////////////////
    if (SpoButton.wasPressed()) { 
-      SPO2btn_funct();
+
+         M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
+        SPO2btn_funct();
 
     break;  
     }
@@ -157,23 +213,43 @@ void Cura_SettingBtnA(){
 
   //////////////////////// calls for temperature function if temperature touch button pressed ////////////////////////
   if (TempButton.wasPressed()) {
+
+     M5.Axp.SetVibration(200);
+    delay(100);
+    M5.Axp.SetVibration(0);
+
       tempbtn_funct();
 
   break;
   }
 
   if (M5.BtnA.wasPressed()) {     //retun back to sensor selection menu
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
         break;
         }
 
     //////////////////////////////////////////////////////////////////////////////////    
     if (M5.BtnB.wasPressed()) {
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
         return;
     }
 
     if (M5.BtnC.wasPressed()) {
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
         return;
     }
@@ -183,25 +259,29 @@ void Cura_SettingBtnA(){
 return;
 }
 
-void Cura_SettingBtnB(){
+/* void Cura_SettingBtnB(){
 
     M5.Lcd.fillScreen(WHITE); // Clear screen
     M5.Lcd.setCursor(0, 0);
 
+    if (Current_Mode == 1){
     ModeOn_Button.draw();
 
+    //Current_Mode = true;
+    }
 
+    else {
+        ModeOff_Button.draw();
 
-
-
-
+    //Current_Mode = false;
+    }
 
 
     for(;;) {
       M5.update(); // Update button and touch states
 
 
-    ////////////////Calls for Heart Rate function if HeartButton touch button pressed//////////////////////////////////////////////////////////////////////////////////////////////////////
+    ////////////////Call sensor deactivation function if button pressed//////////////////////////////////////////////////////////////////////////////////////////////////////
     if (ModeOn_Button.wasPressed()) {
      
      //deactivate IMU device here
@@ -209,7 +289,19 @@ void Cura_SettingBtnB(){
     //display mode off button
     M5.Lcd.clear();
     ModeOff_Button.draw();
-    break;  
+    Current_Mode = 0;
+    return;  
+    }
+
+    if (ModeOff_Button.wasPressed()) {
+     
+     //deactivate IMU device here
+
+    //display mode off button
+    M5.Lcd.clear();
+    ModeOn_Button.draw();
+    Current_Mode = 1;
+    return;  
     }
 
 
@@ -233,7 +325,7 @@ void Cura_SettingBtnB(){
 
 
 return;
-}
+} */
 
 //////////////Press button to send alert to blynk cloud ////////////////////
 void Cura_SettingBtnC(){
@@ -268,18 +360,37 @@ void Cura_SettingBtnC(){
 
     Alerted_HelpButton.draw();
 
+        M5.Axp.SetVibration(255);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
       if (M5.BtnA.isPressed()) {     //retun back to sensor selection menu
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
         break;
         }
 
     //////////////////////////////////////////////////////////////////////////////////    
     if (M5.BtnB.wasPressed()) {
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
         return;
     }
 
     if (M5.BtnC.wasPressed()) {
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
         return;
     }
@@ -290,17 +401,32 @@ void Cura_SettingBtnC(){
 
 
   if (M5.BtnA.wasPressed()) {     //retun back to sensor selection menu
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
         break;
         }
 
     //////////////////////////////////////////////////////////////////////////////////    
     if (M5.BtnB.wasPressed()) {
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
         return;
     }
 
     if (M5.BtnC.wasPressed()) {
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
         return;
     }
@@ -360,6 +486,11 @@ void Heartbtn_funct(){
 
 
    if (M5.BtnA.wasPressed()) {     //retun back to sensor selection menu
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
         HR_SP.shutdown();
         break;
@@ -367,12 +498,22 @@ void Heartbtn_funct(){
 
     //////////////////////////////////////////////////////////////////////////////////    
     if (M5.BtnB.wasPressed()) {
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         HR_SP.shutdown();
         M5.Lcd.clear();
         return;
     }
 
     if (M5.BtnC.wasPressed()) {
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         HR_SP.shutdown();
         M5.Lcd.clear();
         return;
@@ -436,17 +577,32 @@ void tempbtn_funct(){
     
 
     if (M5.BtnA.wasPressed()) {     //retun back to sensor selection menu
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
         break;
         }
 
     //////////////////////////////////////////////////////////////////////////////////    
     if (M5.BtnB.wasPressed()) {
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
         return;
     }
 
     if (M5.BtnC.wasPressed()) {
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
         return;
     }
@@ -505,6 +661,11 @@ void SPO2btn_funct(){
     }
 
     if (M5.BtnA.wasPressed()) {     //retun back to sensor selection menu
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
         HR_SP.shutdown();
         break;
@@ -512,12 +673,22 @@ void SPO2btn_funct(){
 
     //////////////////////////////////////////////////////////////////////////////////    
     if (M5.BtnB.wasPressed()) {
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
         HR_SP.shutdown();
         return;
     }
 
     if (M5.BtnC.wasPressed()) {
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
         HR_SP.shutdown();
         return;

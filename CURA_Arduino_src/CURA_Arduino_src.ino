@@ -5,8 +5,6 @@
 #include <SD.h>       // Include the SD card library
 #include <WiFi.h> // For ESP32, use <ESP8266WiFi.h> for ESP8266
 #include <HTTPClient.h>
-//#include <M5Unified.h>
-//#include <M5GFX.H>
 #include "CuraImage.h"
 
 #define BLYNK_TEMPLATE_ID "TMPL2ieuJcx5l"
@@ -22,9 +20,8 @@ char ssid[] = "DMCKOY2.4";
 char pass[] = "degan020304";
 
 int V0_value;
-int zero = 0; // Generate a random value
-int one = 1; // Generate a random value
-
+int zero = 0; // used to update blynk alert value
+int one = 1; // used to update blynk alert value
 
 
  ButtonColors on_clrs = { BLACK, WHITE, WHITE }; // Text color, outline color, fill color when pressed
@@ -33,6 +30,7 @@ int one = 1; // Generate a random value
  ButtonColors off = { BLACK, BLACK, BLACK }; // Text color, outline color, fill color when not pressed
  ButtonColors off_mode = { BLACK, WHITE, WHITE }; // Text color, outline color, fill color when not pressed
  PulseOximeter HR_SP;    //This creates a HR/SPo2 object
+ ButtonColors off_clrs2 = {RED, WHITE, WHITE }; // Text color, outline color, fill color when not pressed
 
 
 #include <BlynkSimpleEsp32.h> // For ESP32, use <BlynkSimpleEsp8266.h> for ESP8266
@@ -42,10 +40,11 @@ RTC_DateTypeDef RTC_DateStruct; // Structure to hold date data
 
 Adafruit_MLX90614 mlx;
 
+
+
 /* ================================================================
 =========================== Function prototypes ===================
-=================================================================== */
- 
+=================================================================== */ 
 
 void Cura_SettingBtnA();
 void Cura_SettingBtnB();
@@ -53,26 +52,21 @@ void Cura_SettingBtnC();
 void Heartbtn_funct();
 void tempbtn_funct();
 void SPO2btn_funct();
-
-
+void Font_Setup();
+void Detection_Off();
+void Detection_On();
 
 
 /* ================================================================
 ============================== Variables ==========================
 =================================================================== */
 
-
   // Variables for storing heart rate, temp and SpO2
 uint32_t tsLastReport = 0;
 const int REPORTING_PERIOD_MS = 1000; // Report every 1 second
 uint32_t TempF;    //VARIABLE FOR STORING TEMPERATURE
-int Current_Mode;
+//int Current_Mode;
 
-Button Alerted_HelpButton(5, 4, 311, 230, false, "Alerted Help!!!", Alert_clrs, on_clrs, MC_DATUM );
-    // (x, y, width, height, isToggle, label, off_colors, on_colors, datum)
-Button HelpButton(5, 4, 311, 230, false, "Press for Help", off_clrs, on_clrs, MC_DATUM );
-//Button ModeOn_Button(5, 4, 311, 230, false, "Fall Detect On", off_clrs, on_clrs, MC_DATUM );
-//Button ModeOff_Button(5, 4, 311, 230, false, "Fall Detect Off", off_mode, on_clrs, MC_DATUM );
 
 
 
@@ -82,16 +76,14 @@ Button HelpButton(5, 4, 311, 230, false, "Press for Help", off_clrs, on_clrs, MC
 ======================= System setup =============================
 ================================================================== */
 
-
-
 void setup() {
   M5.begin(); // Initialize M5Stack Core2
   M5.Rtc.begin(); // Initialize the RTC module
-  M5.Lcd.setTextFont(2); // Set a suitable font for display
-  M5.Lcd.setTextSize(2); // Set text size
-  M5.Lcd.setTextColor(WHITE, BLACK); // Set text color to black on white background
-
+  Blynk.run();
+  M5.Lcd.fillScreen(WHITE); // Clear screen
 }
+
+
 
 
 
@@ -102,19 +94,21 @@ void setup() {
 
 void loop() {
 
-  setup();
+  Font_Setup(2, 2, BLACK, WHITE);
   M5.update(); // Update button and touch states
 
 
-  M5.Lcd.pushImage(0, 0, HEART2_WIDTH, HEART2_HEIGHT, (uint8_t*)Heart2);
+  M5.Lcd.pushImage(50, 60, HEART2_WIDTH, HEART2_HEIGHT, (uint8_t*)Heart2);    //displays home screen image
+  
 
   M5.Rtc.GetTime(&RTC_TimeStruct); // Get current time from RTC
   M5.Rtc.GetDate(&RTC_DateStruct); // Get current date from RTC
 
-  //M5.Lcd.clear();
+  
   M5.Lcd.setCursor(0, 0); // Set cursor to the top-left corner
   M5.Lcd.printf("Date: %04d-%02d-%02d\n", RTC_DateStruct.Year, RTC_DateStruct.Month, RTC_DateStruct.Date);
   M5.Lcd.printf("Time: %02d:%02d:%02d\n", RTC_TimeStruct.Hours, RTC_TimeStruct.Minutes, RTC_TimeStruct.Seconds);
+
 
 //button A settings menu and functions
 if (M5.BtnA.wasPressed()) {
@@ -134,7 +128,10 @@ if (M5.BtnB.wasPressed()) {
    delay(100);
    M5.Axp.SetVibration(0);
 
-   //Cura_SettingBtnB();
+   Cura_SettingBtnB();
+
+   M5.Lcd.fillScreen(WHITE); // Clear screen
+   
 
 }
 
@@ -159,19 +156,18 @@ if (M5.BtnC.wasPressed()) {
 ========================== FUNCTION DEFINITIONS ==================
 ================================================================== */
 
-
 void Cura_SettingBtnA(){
 
     M5.Lcd.fillScreen(WHITE); // Clear screen
     M5.Lcd.setCursor(0, 0);
 
-    Button HeartButton(5, 4, 311, 72, false, "Heart Rate", off_clrs, on_clrs, MC_DATUM );
+    Button HeartButton(5, 4, 311, 72, false, "Heart Rate", off_clrs2, on_clrs, MC_DATUM );
     // (x, y, width, height, isToggle, label, off_colors, on_colors, datum)
 
-    Button SpoButton(5, 80, 311, 72, false, "SPo2", off_clrs, on_clrs, MC_DATUM );
+    Button SpoButton(5, 80, 311, 72, false, "SPo2", off_clrs2, on_clrs, MC_DATUM );
     // (x, y, width, height, isToggle, label, off_colors, on_colors, datum)
 
-    Button TempButton(5, 158, 311, 72, false, "Temperature", off_clrs, on_clrs, MC_DATUM );
+    Button TempButton(5, 158, 311, 72, false, "Temperature", off_clrs2, on_clrs, MC_DATUM );
     // (x, y, width, height, isToggle, label, off_colors, on_colors, datum)
 
 
@@ -230,6 +226,7 @@ void Cura_SettingBtnA(){
         M5.Axp.SetVibration(0);
 
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         break;
         }
 
@@ -241,6 +238,7 @@ void Cura_SettingBtnA(){
         M5.Axp.SetVibration(0);
 
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         return;
     }
 
@@ -251,6 +249,7 @@ void Cura_SettingBtnA(){
         M5.Axp.SetVibration(0);
 
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         return;
     }
   } 
@@ -259,83 +258,127 @@ void Cura_SettingBtnA(){
 return;
 }
 
-/* void Cura_SettingBtnB(){
+void Cura_SettingBtnB(){
 
     M5.Lcd.fillScreen(WHITE); // Clear screen
     M5.Lcd.setCursor(0, 0);
 
-    if (Current_Mode == 1){
-    ModeOn_Button.draw();
+    Button ModeOn_Button(5, 4, 311, 72, false, "Detect On", off_clrs, on_clrs, MC_DATUM );
+    // (x, y, width, height, isToggle, label, off_colors, on_colors, datum)
 
-    //Current_Mode = true;
-    }
+    Button ModeOff_Button(5, 80, 311, 72, false,"Detection Off", off_clrs, on_clrs, MC_DATUM );
+    // (x, y, width, height, isToggle, label, off_colors, on_colors, datum)
 
-    else {
-        ModeOff_Button.draw();
+    Button Med_Remind(5, 158, 311, 72, false, "Set Med Remind", off_clrs, on_clrs, MC_DATUM );
+    // (x, y, width, height, isToggle, label, off_colors, on_colors, datum)
 
-    //Current_Mode = false;
-    }
+
+
+
+
+
 
 
     for(;;) {
       M5.update(); // Update button and touch states
 
 
-    ////////////////Call sensor deactivation function if button pressed//////////////////////////////////////////////////////////////////////////////////////////////////////
+    ////////////////Calls for function to turn on fall detection//////////////////
     if (ModeOn_Button.wasPressed()) {
-     
-     //deactivate IMU device here
 
-    //display mode off button
-    M5.Lcd.clear();
-    ModeOff_Button.draw();
-    Current_Mode = 0;
-    return;  
-    }
+         M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
 
-    if (ModeOff_Button.wasPressed()) {
-     
-     //deactivate IMU device here
+        M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
 
-    //display mode off button
-    M5.Lcd.clear();
-    ModeOn_Button.draw();
-    Current_Mode = 1;
-    return;  
+        //Turn on sensor functions here
+        Detection_On();
+    break;  
     }
 
 
+  ////////////////Calls for function to turn off fall detection/////////////////////////////////
+   if (ModeOff_Button.wasPressed()) { 
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
+        M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
+
+        //Turn off sensor functions here
+        Detection_Off();
+
+    break;  
+    }
+
+
+  //////////////////////// Can use this to set up additional functions when button pressed ////////////////////////
+   if (Med_Remind.wasPressed()) {
+
+     M5.Axp.SetVibration(200);
+    delay(100);
+    M5.Axp.SetVibration(0);
+
+      
+
+  break;
+  } 
 
   if (M5.BtnA.wasPressed()) {     //retun back to sensor selection menu
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         break;
         }
 
     //////////////////////////////////////////////////////////////////////////////////    
     if (M5.BtnB.wasPressed()) {
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         return;
     }
 
     if (M5.BtnC.wasPressed()) {
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         return;
     }
   } 
 
 
 return;
-} */
+}
+ 
 
 //////////////Press button to send alert to blynk cloud ////////////////////
 void Cura_SettingBtnC(){
 
+    //Blynk.run();
+
     M5.Lcd.fillScreen(WHITE); // Clear screen
     M5.Lcd.setCursor(0, 0);
 
-    HelpButton.draw();
+    Button HelpButton(5, 4, 311, 230, false, "Press for Help", off_clrs, on_clrs, MC_DATUM );
     
-    Blynk.run();
+    //Blynk.run();
 
  
     for(;;) {
@@ -358,7 +401,8 @@ void Cura_SettingBtnC(){
 
 
 
-    Alerted_HelpButton.draw();
+    //Alerted_HelpButton.draw();
+        Button Alerted_HelpButton(5, 4, 311, 230, false, "Alerted Help!!!", Alert_clrs, on_clrs, MC_DATUM );
 
         M5.Axp.SetVibration(255);
         delay(100);
@@ -371,6 +415,7 @@ void Cura_SettingBtnC(){
         M5.Axp.SetVibration(0);
 
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         break;
         }
 
@@ -382,6 +427,7 @@ void Cura_SettingBtnC(){
         M5.Axp.SetVibration(0);
 
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         return;
     }
 
@@ -392,6 +438,7 @@ void Cura_SettingBtnC(){
         M5.Axp.SetVibration(0);
 
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         return;
     }
 
@@ -407,6 +454,7 @@ void Cura_SettingBtnC(){
         M5.Axp.SetVibration(0);
 
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         break;
         }
 
@@ -418,6 +466,7 @@ void Cura_SettingBtnC(){
         M5.Axp.SetVibration(0);
 
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         return;
     }
 
@@ -428,6 +477,7 @@ void Cura_SettingBtnC(){
         M5.Axp.SetVibration(0);
 
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         return;
     }
   } 
@@ -439,7 +489,7 @@ return;
 
 void Heartbtn_funct(){ 
      M5.Lcd.fillScreen(BLACK); // Clear screen
-
+    M5.Lcd.setTextColor(WHITE, BLACK); // Set text color to white on black background
 
     Button HeartButton(5, 4, 311, 72, false, "Heart Rate", off, off, MC_DATUM );
     // (x, y, width, height, isToggle, label, off_colors, on_colors, datum)
@@ -472,13 +522,14 @@ void Heartbtn_funct(){
     //////////read and print heart rate values to LCD here in this section/////////////
      // Report heart rate and SpO2 at regular intervals
     if (millis() - tsLastReport > REPORTING_PERIOD_MS) {
-
+    
     M5.Lcd.clear();
-    M5.Lcd.setCursor(80, 100);
-    M5.Lcd.setTextSize(1); // Set text size
-    M5.Lcd.print("Heart Rate: " ); 
+    M5.Lcd.pushImage(10, 95, HEART_WIDTH, HEART_HEIGHT, (uint8_t*)heart);    //displays home screen image
+    M5.Lcd.setCursor(70, 130);
+    M5.Lcd.setTextSize(2); // Set text size
+    M5.Lcd.print("HR: " ); 
     M5.Lcd.print(HR_SP.getHeartRate());
-    M5.Lcd.println("    bpm");
+    //M5.Lcd.println(" bpm");
 
     tsLastReport = millis();
     }
@@ -492,6 +543,7 @@ void Heartbtn_funct(){
         M5.Axp.SetVibration(0);
 
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         HR_SP.shutdown();
         break;
         }
@@ -505,6 +557,7 @@ void Heartbtn_funct(){
 
         HR_SP.shutdown();
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         return;
     }
 
@@ -516,6 +569,7 @@ void Heartbtn_funct(){
 
         HR_SP.shutdown();
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         return;
     }
 
@@ -529,6 +583,7 @@ return;
 void tempbtn_funct(){
  M5.Lcd.clear();
  M5.Lcd.fillScreen(BLACK); // Clear screen
+ M5.Lcd.setTextColor(WHITE, BLACK); // Set text color to white on black background
 
 
     Button HeartButton(5, 4, 311, 72, false, "Heart Rate", off, off, MC_DATUM );
@@ -567,10 +622,11 @@ void tempbtn_funct(){
 
 
     M5.Lcd.clear();
-    M5.Lcd.setCursor(80, 100);
+    M5.Lcd.pushImage(10, 70, THERMOMETER_PNG_WIDTH, THERMOMETER_PNG_HEIGHT, (uint8_t*)Thermometer_PNG);    //displays home screen image
+    M5.Lcd.setCursor(100, 130);
     M5.Lcd.print("Temp: " ); 
     M5.Lcd.print(TempF);
-    M5.Lcd.println("    *");
+    M5.Lcd.println("*");
 
     tsLastReport = millis();
     }
@@ -583,6 +639,7 @@ void tempbtn_funct(){
         M5.Axp.SetVibration(0);
 
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         break;
         }
 
@@ -594,6 +651,7 @@ void tempbtn_funct(){
         M5.Axp.SetVibration(0);
 
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         return;
     }
 
@@ -604,6 +662,7 @@ void tempbtn_funct(){
         M5.Axp.SetVibration(0);
 
         M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         return;
     }
     
@@ -617,6 +676,7 @@ return;
 void SPO2btn_funct(){
 
  M5.Lcd.fillScreen(BLACK); // Clear screen
+ M5.Lcd.setTextColor(WHITE, BLACK); // Set text color to white on black background
 
 
     Button HeartButton(5, 4, 311, 72, false, "Heart Rate", off, off, MC_DATUM );
@@ -652,10 +712,11 @@ void SPO2btn_funct(){
     if (millis() - tsLastReport > REPORTING_PERIOD_MS) {
 
         M5.Lcd.clear();
-        M5.Lcd.setCursor(80, 100);
+        M5.Lcd.pushImage(10, 70, PULSEOX_PNG_WIDTH, PULSEOX_PNG_HEIGHT, (uint8_t*)PulseOX_PNG);    //displays home screen image
+        M5.Lcd.setCursor(100, 130);
         M5.Lcd.print("SP02: " ); 
         M5.Lcd.print(HR_SP.getSpO2());
-        M5.Lcd.println("    %");
+        M5.Lcd.println("%");
 
         tsLastReport = millis();
     }
@@ -668,6 +729,7 @@ void SPO2btn_funct(){
 
         M5.Lcd.clear();
         HR_SP.shutdown();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         break;
         }
 
@@ -680,6 +742,7 @@ void SPO2btn_funct(){
 
         M5.Lcd.clear();
         HR_SP.shutdown();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         return;
     }
 
@@ -691,6 +754,7 @@ void SPO2btn_funct(){
 
         M5.Lcd.clear();
         HR_SP.shutdown();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
         return;
     }
     
@@ -726,4 +790,45 @@ void sendAlert() {
   }
 
 
+}
+
+
+//settings for home screen font
+void Font_Setup( int font, int size, uint16_t a, uint16_t b){
+   M5.Lcd.setTextFont(font); // Set a suitable font for display
+   M5.Lcd.setTextSize(size); // Set text size
+   M5.Lcd.setTextColor(a, b); // Set text color to black on white background 
+}
+
+void Detection_On(){
+
+    M5.Lcd.fillScreen(BLACK); // Clear screen
+    M5.Lcd.setTextColor(WHITE, BLACK); // Set text color to white on black background
+    M5.Lcd.clear();
+    M5.Lcd.setCursor(10, 120);
+
+    M5.Lcd.println("Fall Detection On!");
+    delay(2000);
+
+    M5.Lcd.clear();
+    M5.Lcd.fillScreen(WHITE); // Clear screen
+
+    return;
+}
+
+
+void Detection_Off(){
+
+    M5.Lcd.fillScreen(BLACK); // Clear screen
+    M5.Lcd.setTextColor(WHITE, BLACK); // Set text color to white on black background
+    M5.Lcd.clear();
+    M5.Lcd.setCursor(10, 120);
+
+    M5.Lcd.println("Fall Detection Off!");
+    delay(2000);
+
+    M5.Lcd.clear();
+    M5.Lcd.fillScreen(WHITE); // Clear screen
+
+    return;
 }

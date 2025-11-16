@@ -6,28 +6,40 @@
 #include <WiFi.h> // For ESP32, use <ESP8266WiFi.h> for ESP8266
 #include <HTTPClient.h>
 #include "CuraImage.h"  //Says include local header file
+//#include <M5Stack.h>
 //#include "LLM_Function.h" //Says include local LLM function header file
-//#include <Arduino.h>
+#include <Arduino.h>
 //#include <M5Unified.h>
-//#include <M5ModuleLLM.h>
+#include <M5ModuleLLM.h>
 
 #define BLYNK_TEMPLATE_ID "TMPL2ieuJcx5l"
 #define BLYNK_TEMPLATE_NAME "CURA Health Watch"
 #define BLYNK_AUTH_TOKEN    "RRHlA3GZ703ig6CQt6NgP4Bi9ejpF_Uz"
+//#define PAHUB2_ADDRESS 0x71 
 
 //const char* blynkAuthToken = "RRHlA3GZ703ig6CQt6NgP4Bi9ejpF_Uz";
 const char* blynkServer = "blynk.cloud"; // Or your custom Blynk server if self-hosting
 
 
+//WiFi credentials
+ char ssid[] = "DMCKOY2.4";
+char pass[] = "degan020304";  
 
-
-char ssid[] = "UNLV-PSK";
+/* char ssid[] = "UNLV-PSK";
 char pass[] = "XTq7c94pcu"; 
+ */
+
 
 int V0_value;
 int zero = 0; // used to update blynk alert value
 int one = 1; // used to update blynk alert value
+M5ModuleLLM module_llm;
 
+
+String wake_up_keyword = "CALL HELP";
+String kws_work_id;
+String asr_work_id;
+String language;
 
  ButtonColors on_clrs = { BLACK, WHITE, WHITE }; // Text color, outline color, fill color when pressed
  ButtonColors Alert_clrs = { RED, WHITE, WHITE };
@@ -57,6 +69,7 @@ M5ModuleLLM_VoiceAssistant voice_assistant(&module_llm); */
 void Cura_SettingBtnA();
 void Cura_SettingBtnB();
 void Cura_SettingBtnC();
+void Cura_SettingBtnC_LLM();
 void Heartbtn_funct();
 void tempbtn_funct();
 void SPO2btn_funct();
@@ -93,13 +106,6 @@ uint32_t TempF;    //VARIABLE FOR STORING TEMPERATURE
 
 void setup() {
 
-/*================================================================
- ====================== Voice Assistant Setup =====================
- ================================================================== */
-
-   
- //place setup here. 
-
 
   /* ===============================================================
   ===================== CURA Setup =================================
@@ -109,9 +115,69 @@ void setup() {
   M5.Rtc.begin(); // Initialize the RTC module
   Blynk.run();
   M5.Lcd.fillScreen(WHITE); // Clear screen
+  M5.Lcd.setTextColor(BLACK);
+
+  Wire.begin(); // Initialize I2C communication
+ 
+ // Wire.beginTransmission(PAHUB2_ADDRESS);
+  //Wire.write(1 << 0);
+  //Wire.endTransmission();
 
 
+/*================================================================
+ ====================== Voice Assistant Setup =====================
+ ================================================================== */
 
+
+  M5.Lcd.setTextSize(2);
+    //M5.Lcd.setTextScroll(true);
+    // M5.Display.setFont(&fonts::efontCN_12);  // Support Chinese display
+
+    language = "en_US";
+
+    /* Init module serial port */
+    #define RXD2_PIN 13
+    #define TXD2_PIN 14
+    //int rxd = M5.getPin(m5::pin_name_t::port_c_rxd);
+    //int txd = M5.getPin(m5::pin_name_t::port_c_txd);
+    Serial2.begin(115200, SERIAL_8N1, RXD2_PIN, TXD2_PIN);
+
+    /* Init module */
+    module_llm.begin(&Serial2);
+
+    /* Make sure module is connected */
+    M5.Lcd.printf(">> Check ModuleLLM connection..\n");
+    while (1) {
+        if (module_llm.checkConnection()) {
+            break;
+        }
+    }
+
+    /* Reset ModuleLLM */
+    M5.Lcd.printf(">> Reset ModuleLLM..\n");
+    module_llm.sys.reset();
+
+    /* Setup Audio module */
+    M5.Lcd.printf(">> Setup audio..\n");
+    module_llm.audio.setup();
+
+    /* Setup KWS module and save returned work id */
+    M5.Lcd.printf(">> Setup kws..\n");
+    m5_module_llm::ApiKwsSetupConfig_t kws_config;
+    kws_config.kws = wake_up_keyword;
+    kws_work_id    = module_llm.kws.setup(kws_config, "kws_setup", language);
+
+    /* Setup ASR module and save returned work id */
+    M5.Lcd.printf(">> Setup asr..\n");
+    m5_module_llm::ApiAsrSetupConfig_t asr_config;
+    asr_config.input = {"sys.pcm", kws_work_id};
+    asr_work_id      = module_llm.asr.setup(asr_config, "asr_setup", language);
+
+    M5.Lcd.printf(">> Setup ok\n>> Say \"%s\" to wakeup\n", wake_up_keyword.c_str()); 
+
+    M5.Lcd.clear();
+    M5.Lcd.fillScreen(WHITE);
+    
 }
 
 
@@ -125,8 +191,41 @@ void setup() {
 
 void loop() {
 
-  /* Keep voice assistant preset update */
-   /*  voice_assistant.update(); */
+   /* Update ModuleLLM */
+    module_llm.update();
+
+    /* Handle module response messages */
+    for (auto& msg : module_llm.msg.responseMsgList) {
+        /* If KWS module message */
+        if (msg.work_id == kws_work_id) {
+            M5.Lcd.setTextColor(RED);
+            M5.Lcd.setCursor(6, 207);
+            M5.Lcd.printf(">> !!CALLING HELP!!\n");
+
+            Cura_SettingBtnC_LLM();
+            //sendAlert();
+
+            //delay(5000);
+        }
+
+        /* If ASR module message */
+        if (msg.work_id == asr_work_id) {
+            /* Check message object type */
+            if (msg.object == "asr.utf-8.stream") {
+                /* Parse message json and get ASR result */
+                JsonDocument doc;
+                deserializeJson(doc, msg.raw_msg);
+                String asr_result = doc["data"]["delta"].as<String>();
+
+                M5.Lcd.setTextColor(TFT_YELLOW);
+                M5.Lcd.printf(">> %s\n", asr_result.c_str());
+                
+            }
+        }
+    }
+
+    /* Clear handled messages */
+    module_llm.msg.responseMsgList.clear();
 
   Font_Setup(2, 2, BLACK, WHITE);
   M5.update(); // Update button and touch states
@@ -354,16 +453,13 @@ void Cura_SettingBtnB(){
   //////////////////////// Can use this to set up additional functions when button pressed ////////////////////////
    if (Med_Remind.wasPressed()) {
 
+    M5.update();
+
      M5.Axp.SetVibration(200);
     delay(100);
     M5.Axp.SetVibration(0);
 
 
-    MacAdd();
-
-
-    //Serial.print("MAC Address: ");
-    //Serial.println(WiFi.macAddress());
       
 
   break;
@@ -527,6 +623,78 @@ void Cura_SettingBtnC(){
 return;
 }
 
+void Cura_SettingBtnC_LLM(){
+
+     sendAlert();
+
+    //Blynk.run();
+    M5.Lcd.clear();
+    M5.Lcd.fillScreen(WHITE); // Clear screen
+    M5.Lcd.setCursor(0, 0);
+
+
+
+    ////////////////Calls for Heart Rate function if HeartButton touch button pressed////////////////////////////////////////////////////////////////////////////////////////////////////
+      
+
+
+
+
+      for(;;){
+          M5.update(); // Update button and touch states
+
+
+
+    //Alerted_HelpButton.draw();
+        Button Alerted_HelpButton(5, 4, 311, 230, false, "Alerted Help!!!", Alert_clrs, on_clrs, MC_DATUM );
+
+        M5.Axp.SetVibration(255);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
+      if (M5.BtnA.isPressed()) {     //retun back to sensor selection menu
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
+        M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
+        break;
+        }
+
+    //////////////////////////////////////////////////////////////////////////////////    
+    if (M5.BtnB.wasPressed()) {
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
+        M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
+        return;
+    }
+
+    if (M5.BtnC.wasPressed()) {
+
+        M5.Axp.SetVibration(200);
+        delay(100);
+        M5.Axp.SetVibration(0);
+
+        M5.Lcd.clear();
+        M5.Lcd.fillScreen(WHITE); // Clear screen
+        return;
+    }
+
+    delay(100);
+    }
+    
+
+
+  
+
+return;
+}
 
 void Heartbtn_funct(){ 
      M5.Lcd.fillScreen(BLACK); // Clear screen
@@ -843,6 +1011,7 @@ void Font_Setup( int font, int size, uint16_t a, uint16_t b){
 
 void Detection_On(){
 
+    M5.update();
     M5.Lcd.fillScreen(BLACK); // Clear screen
     M5.Lcd.setTextColor(WHITE, BLACK); // Set text color to white on black background
     M5.Lcd.clear();
@@ -860,6 +1029,7 @@ void Detection_On(){
 
 void Detection_Off(){
 
+    M5.update();
     M5.Lcd.fillScreen(BLACK); // Clear screen
     M5.Lcd.setTextColor(WHITE, BLACK); // Set text color to white on black background
     M5.Lcd.clear();
@@ -888,6 +1058,7 @@ void MacAdd(){
 
     //M5.Lcd.print("MAC Address: ");
     //M5.Lcd.println(WiFi.macAddress());
+
 
     delay(5000);
 

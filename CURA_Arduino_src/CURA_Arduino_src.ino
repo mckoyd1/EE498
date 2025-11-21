@@ -6,10 +6,7 @@
 #include <WiFi.h> // For ESP32, use <ESP8266WiFi.h> for ESP8266
 #include <HTTPClient.h>
 #include "CuraImage.h"  //Says include local header file
-//#include <M5Stack.h>
-//#include "LLM_Function.h" //Says include local LLM function header file
 #include <Arduino.h>
-//#include <M5Unified.h>
 #include <M5ModuleLLM.h>
 
 #define BLYNK_TEMPLATE_ID "TMPL2ieuJcx5l"
@@ -22,18 +19,47 @@ const char* blynkServer = "blynk.cloud"; // Or your custom Blynk server if self-
 
 
 //WiFi credentials
- char ssid[] = "DMCKOY2.4";
-char pass[] = "degan020304";  
 
-/* char ssid[] = "UNLV-PSK";
+
+ /*char ssid[] = "UNLV-PSK";
 char pass[] = "XTq7c94pcu"; 
  */
 
 
+//Medication reminder definitions and function prototypes
+//=======================================================
+
+// ─── Speaker Config ─────────────────────────
+const int SPEAKER_PIN = 25;
+const int SPEAKER_CH  = 0;
+
+// ─── Function Declarations ─────────────────────
+void setCurrentTime();
+void displayHomeScreen();
+int  getTimeInput(const char* label, int maxValue, int minValue, bool allowCancel);
+bool getAMPMInput(bool allowCancel);
+void playReminderAlertLoop();
+void MedRemind();
+
+// ─── Global Variables ──────────────────────────
+int  medHour      = -1;
+int  medMinute    = -1;
+bool medPM        = false;
+bool reminderSet  = false;
+//============================================================
+
+
+
+unsigned long lastTimeUpdate = 0;
+bool initialTimeSetup = true;
+bool alarmActive = false;
 int V0_value;
 int zero = 0; // used to update blynk alert value
 int one = 1; // used to update blynk alert value
 M5ModuleLLM module_llm;
+
+const uint8_t PAHUB_ADDR = 0x70; // 7-bit address (change if you set DIP) for Pa.Hub
+//const uint8_t PAHUB_ADDR2 = 0x71; // 7-bit address (change if you set DIP) for Pa.Hub
 
 
 String wake_up_keyword = "CALL HELP";
@@ -76,6 +102,8 @@ void SPO2btn_funct();
 void Font_Setup();
 void Detection_Off();
 void Detection_On();
+void pahub_select(uint8_t channel);
+void pahub_selectoff(uint8_t channel);
 
 
 /* ================================================================
@@ -118,11 +146,27 @@ void setup() {
   M5.Lcd.setTextColor(BLACK);
 
   Wire.begin(); // Initialize I2C communication
- 
- // Wire.beginTransmission(PAHUB2_ADDRESS);
-  //Wire.write(1 << 0);
-  //Wire.endTransmission();
+  //Wire.begin(32, 33, 400000);  // 100kHz solves 80% of MAX30100 issues
+  Serial.begin(115200);
+  delay(300);
 
+  
+
+  pahub_select(0);
+
+
+/*================================================================
+ ====================== Med Reminder Setup =====================
+ ================================================================== */
+
+  ledcAttachPin(SPEAKER_PIN, SPEAKER_CH);
+  ledcSetup(SPEAKER_CH, 4000, 10);
+
+  setCurrentTime();
+  initialTimeSetup = false;
+
+  M5.Lcd.clear();
+  M5.Lcd.setCursor(0, 0); // Set cursor to the top-left corner
 
 /*================================================================
  ====================== Voice Assistant Setup =====================
@@ -250,7 +294,9 @@ if (M5.BtnA.wasPressed()) {
    delay(100);
    M5.Axp.SetVibration(0);
 
+   
    Cura_SettingBtnA();
+
 
 }
 
@@ -278,6 +324,54 @@ if (M5.BtnC.wasPressed()) {
 
 }
   delay(10); // Small delay for stability
+
+    // ─── Check for reminder trigger ──────────────────
+  RTC_TimeTypeDef now;
+  M5.Rtc.GetTime(&now);
+  int nowHour12 = now.Hours % 12; if (nowHour12 == 0) nowHour12 = 12;
+  bool nowPM = (now.Hours >= 12);
+
+  if (reminderSet &&
+      nowHour12 == medHour &&
+      now.Minutes == medMinute &&
+      nowPM == medPM &&
+      now.Seconds == 0 &&
+      !alarmActive) {
+
+    alarmActive = true;
+    M5.Lcd.fillScreen(BLACK);
+    M5.Lcd.setTextSize(2);
+    M5.Lcd.setTextColor(WHITE, BLACK);
+    M5.Lcd.setCursor(20, 100);
+    M5.Lcd.println("TIME TO TAKE MEDICATION!");
+    M5.Lcd.setCursor(40, 150);
+    M5.Lcd.println("Hold B to dismiss alarm");
+  }
+
+  // ─── Alarm Loop ──────────────────────────────────
+  if (alarmActive) {
+    playReminderAlertLoop();
+
+    if (M5.BtnB.pressedFor(3000)) {
+      alarmActive = false;
+      reminderSet = false;
+      medHour = -1;
+      medMinute = -1;
+      medPM = false;
+
+      M5.Axp.SetVibration(false);
+      ledcWriteTone(SPEAKER_CH, 0);
+
+      M5.Lcd.fillScreen(BLACK);
+      M5.Lcd.setTextColor(WHITE, BLACK);
+      M5.Lcd.setCursor(40, 120);
+      M5.Lcd.println("Reminder dismissed");
+      delay(1500);
+      displayHomeScreen();
+    }
+  }
+
+  delay(50);
 }
 
 
@@ -459,7 +553,7 @@ void Cura_SettingBtnB(){
     delay(100);
     M5.Axp.SetVibration(0);
 
-
+    MedRemind();
       
 
   break;
@@ -697,7 +791,13 @@ return;
 }
 
 void Heartbtn_funct(){ 
-     M5.Lcd.fillScreen(BLACK); // Clear screen
+
+   Wire.setClock(400000);
+  //Serial.begin(115200);
+  pahub_select(1);
+  delay(300);
+
+    M5.Lcd.fillScreen(BLACK); // Clear screen
     M5.Lcd.setTextColor(WHITE, BLACK); // Set text color to white on black background
 
     Button HeartButton(5, 4, 311, 72, false, "Heart Rate", off, off, MC_DATUM );
@@ -790,6 +890,13 @@ return;
 }
 
 void tempbtn_funct(){
+
+ //Wire.begin(32, 33, 100000);  // 100kHz solves 80% of MAX30100 issues
+  Wire.setClock(100000);
+  //Serial.begin(115200);
+  pahub_select(0);
+  delay(300);
+
  M5.Lcd.clear();
  M5.Lcd.fillScreen(BLACK); // Clear screen
  M5.Lcd.setTextColor(WHITE, BLACK); // Set text color to white on black background
@@ -829,7 +936,7 @@ void tempbtn_funct(){
 
     TempF = mlx.readObjectTempF();
 
-
+    //pahub_select(0);
     M5.Lcd.clear();
     M5.Lcd.pushImage(10, 70, THERMOMETER_PNG_WIDTH, THERMOMETER_PNG_HEIGHT, (uint8_t*)Thermometer_PNG);    //displays home screen image
     M5.Lcd.setCursor(100, 130);
@@ -849,6 +956,7 @@ void tempbtn_funct(){
 
         M5.Lcd.clear();
         M5.Lcd.fillScreen(WHITE); // Clear screen
+        pahub_selectoff(0);
         break;
         }
 
@@ -883,6 +991,11 @@ return;
 
 
 void SPO2btn_funct(){
+
+  Wire.setClock(400000);
+  //Serial.begin(115200);
+  pahub_select(1);
+  delay(300);
 
  M5.Lcd.fillScreen(BLACK); // Clear screen
  M5.Lcd.setTextColor(WHITE, BLACK); // Set text color to white on black background
@@ -939,6 +1052,7 @@ void SPO2btn_funct(){
         M5.Lcd.clear();
         HR_SP.shutdown();
         M5.Lcd.fillScreen(WHITE); // Clear screen
+        pahub_selectoff(1);  // Idle state
         break;
         }
 
@@ -952,6 +1066,7 @@ void SPO2btn_funct(){
         M5.Lcd.clear();
         HR_SP.shutdown();
         M5.Lcd.fillScreen(WHITE); // Clear screen
+        pahub_selectoff(1);  // Idle state
         return;
     }
 
@@ -964,11 +1079,10 @@ void SPO2btn_funct(){
         M5.Lcd.clear();
         HR_SP.shutdown();
         M5.Lcd.fillScreen(WHITE); // Clear screen
+        pahub_selectoff(1);  // Idle state
         return;
     }
     
-      
-
     }
     
 return;
@@ -1044,26 +1158,277 @@ void Detection_Off(){
     return;
 }
 
-void MacAdd(){
+void MedRemind(){
 
-    M5.Lcd.fillScreen(BLACK); // Clear screen
-    M5.Lcd.setTextColor(WHITE, BLACK); // Set text color to white on black background
-    M5.Lcd.clear();
-    M5.Lcd.setCursor(10, 120);
+ M5.update();
+for(;;){
 
-    //String deviceName = WiFi.getHostname();
+  if (!alarmActive && (millis() - lastTimeUpdate >= 1000)) {
+    lastTimeUpdate = millis();
+    displayHomeScreen();
+  }
 
-    M5.Lcd.print("Name: ");
-    M5.Lcd.println(WiFi.getHostname());
+  // Hold A (3s): Reset current time
+  if (!initialTimeSetup && !alarmActive && M5.BtnA.pressedFor(3000)) {
+    setCurrentTime();
+    //displayHomeScreen();
+  }
 
-    //M5.Lcd.print("MAC Address: ");
-    //M5.Lcd.println(WiFi.macAddress());
+  // Tap A: Set reminder
+  if (M5.BtnA.wasPressed() && !alarmActive) {
+    M5.Lcd.fillScreen(BLACK);
+    M5.Lcd.setTextColor(WHITE, BLACK);
+    M5.Lcd.setCursor(10, 20);
+    //////////////////////////////////////////////
+    M5.Lcd.println("Set Reminder Time");
 
+    medHour = getTimeInput("Hour (1-12): ", 12, 1, true);
+    if (medHour == -1) { displayHomeScreen(); return; }
 
-    delay(5000);
+    medMinute = getTimeInput("Minute (0-59): ", 59, 0, true);
+    if (medMinute == -1) { displayHomeScreen(); return; }
+
+    //M5.Lcd.clear();
+
+    medPM = getAMPMInput(true);
+    if (medPM == 2) { displayHomeScreen(); return; }
+
+    reminderSet = true;
+    M5.Lcd.fillScreen(BLACK);
+    M5.Lcd.setTextColor(WHITE, BLACK);
+    M5.Lcd.setCursor(10, 20);
+    M5.Lcd.printf("Reminder set for %02d:%02d %s",
+                  medHour, medMinute, medPM ? "PM" : "AM");
+    delay(2000);
+    return;
+    //displayHomeScreen();
+  }
+
+  // Tap B: Check reminder
+  if (M5.BtnB.wasPressed() && !alarmActive) {
+    M5.Lcd.fillScreen(BLACK);
+    M5.Lcd.setTextColor(WHITE, BLACK);
+    M5.Lcd.setCursor(10, 100);
+    if (reminderSet)
+      M5.Lcd.printf("Current Reminder: %02d:%02d %s",
+                    medHour, medMinute, medPM ? "PM" : "AM");
+    else
+      M5.Lcd.print("No current reminder set.");
+    delay(1500);
+    return;
+    //displayHomeScreen();
+  }
+
+  // Hold C (3s): Clear reminder
+  if (M5.BtnC.pressedFor(3000) && !alarmActive) {
+    reminderSet = false;
+    medHour = -1;
+    medMinute = -1;
+    medPM = false;
+
+    M5.Lcd.fillScreen(BLACK);
+    M5.Lcd.setTextColor(WHITE, BLACK);
+    M5.Lcd.setCursor(10, 100);
+    M5.Lcd.print("Reminder cleared");
+    delay(1500);
+    //displayHomeScreen();
+    return;
+  }
+}
 
     M5.Lcd.clear();
     M5.Lcd.fillScreen(WHITE); // Clear screen
 
+
     return;
+}
+
+//======= Medication Reminder function definitions =======//
+
+void setCurrentTime() {
+  M5.update();
+
+  M5.Lcd.setTextSize(1);
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setTextColor(WHITE, BLACK);
+  M5.Lcd.setCursor(10, 20);
+  M5.Lcd.println("Set Current Time");
+
+  bool allowCancel = !initialTimeSetup;
+  int hour12 = getTimeInput("Hour (1-12): ", 12, 1, allowCancel);
+  if (hour12 == -1) { displayHomeScreen(); return; }
+  int minute = getTimeInput("Minute (0-59): ", 59, 0, allowCancel);
+  if (minute == -1) { displayHomeScreen(); return; }
+  bool isPM = getAMPMInput(allowCancel);
+  if (isPM == 2) { displayHomeScreen(); return; }
+
+  int hour24 = hour12 % 12;
+  if (isPM) hour24 += 12;
+  RTC_TimeTypeDef t;
+  t.Hours = hour24; t.Minutes = minute; t.Seconds = 0;
+  M5.Rtc.SetTime(&t);
+
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setTextColor(WHITE, BLACK);
+  M5.Lcd.setCursor(10, 20);
+  M5.Lcd.printf("Time set to %02d:%02d %s",
+                hour12, minute, isPM ? "PM" : "AM");
+  delay(2000);
+}
+
+// ─── Home Screen/ Intial start-up screen
+void displayHomeScreen() {
+  M5.update();
+
+  RTC_TimeTypeDef now;
+  M5.Rtc.GetTime(&now);
+  int hour12 = now.Hours % 12; if (hour12 == 0) hour12 = 12;
+  bool isPM = (now.Hours >= 12);
+
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setTextSize(1);  
+  M5.Lcd.setTextColor(ORANGE, BLACK);
+
+  const char* title = "Medication Reminder";
+  int titleLength = strlen(title);
+  int charWidth = 12;
+  int totalWidth = titleLength * charWidth;
+  int centerX = (M5.Lcd.width() - totalWidth) / 2;
+
+  M5.Lcd.setCursor(centerX, 30);
+  M5.Lcd.println(title);
+
+  M5.Lcd.setTextSize(1);
+  M5.Lcd.setTextColor(GREEN, BLACK);
+  M5.Lcd.setCursor(10, 90);
+  M5.Lcd.printf("Current Time: %02d:%02d:%02d %s",
+                hour12, now.Minutes, now.Seconds,
+                isPM ? "PM" : "AM");
+
+  M5.Lcd.setTextColor(WHITE, BLACK);
+
+  M5.Lcd.setCursor(10, 130);
+  M5.Lcd.println("Hold Btn A to set reminder");
+
+  M5.Lcd.setCursor(10, 150);
+  M5.Lcd.println("Hold Btn B to check reminder");
+
+  M5.Lcd.setCursor(10, 170);
+  M5.Lcd.println("Hold Btn C to cancel reminder");
+}
+
+// ─── Continuous Beep + Vibration for Alarm ──────────────
+void playReminderAlertLoop() {
+
+  M5.update();
+
+  static unsigned long lastBeep = 0;
+  static bool toneOn = false;
+  const unsigned long beepInterval = 500;
+
+  if (millis() - lastBeep >= beepInterval) {
+    lastBeep = millis();
+
+    if (!toneOn) {
+      M5.Axp.SetSpkEnable(true);
+      M5.Axp.SetVibration(true);
+      ledcWriteTone(SPEAKER_CH, 2800);
+    } else {
+      M5.Axp.SetVibration(false);
+      ledcWriteTone(SPEAKER_CH, 0);
+    }
+    toneOn = !toneOn;
+  }
+}
+
+// ─── User timer input buttons ──────────
+int getTimeInput(const char* label, int maxValue, int minValue, bool allowCancel) {
+
+  M5.update();
+
+  int value = minValue;
+  bool confirmed = false;
+  while (!confirmed) {
+    M5.update();
+    M5.Lcd.fillRect(0, 100, 320, 120, BLACK);
+    M5.Lcd.setTextColor(WHITE, BLACK);
+    M5.Lcd.setCursor(10, 100);
+    M5.Lcd.clear();                              //Added due to numbers overlapping.
+    M5.Lcd.printf("%s %02d", label, value);
+    M5.Lcd.setCursor(10, 140);
+    if (allowCancel) {
+      M5.Lcd.println("A:+  C:-  B:OK");
+      M5.Lcd.setCursor(10, 170);
+      M5.Lcd.println("(Hold A to Cancel)");
+    } else {
+      M5.Lcd.println("A:+  C:-  B:OK");
+    }
+
+    if (M5.BtnA.wasPressed()) { value++; if (value > maxValue) value = minValue; }
+    if (M5.BtnC.wasPressed()) { value--; if (value < minValue) value = maxValue; }
+    if (M5.BtnB.wasPressed()) confirmed = true;
+
+    if (allowCancel && M5.BtnA.pressedFor(3000)) {
+      displayHomeScreen();
+      while (M5.BtnA.isPressed()) { M5.update(); delay(50); }
+      return -1;
+    }
+    delay(100);
+  }
+  return value;
+}
+
+bool getAMPMInput(bool allowCancel) {
+ // M5.Lcd.clear();
+  M5.update();
+
+  bool isPM = false;
+  bool confirmed = false;
+  while (!confirmed) {
+    M5.update();
+    M5.Lcd.fillScreen(BLACK);
+    M5.Lcd.fillRect(0, 100, 320, 120, BLACK);
+    M5.Lcd.setTextColor(WHITE, BLACK);
+    M5.Lcd.setCursor(10, 100);
+    M5.Lcd.printf("Select %s", isPM ? "PM" : "AM");
+    
+    M5.Lcd.setCursor(10, 140);
+    if (allowCancel) {
+      M5.update();
+      M5.Lcd.println("A:Toggle  B:OK");
+      M5.Lcd.setCursor(10, 170);
+      M5.Lcd.println("(Hold A to Cancel)");
+    } else {
+      M5.Lcd.println("A:Toggle  B:OK");
+    }
+
+    if (M5.BtnA.wasPressed()) isPM = !isPM;
+    if (M5.BtnB.wasPressed()) confirmed = true;
+
+    if (allowCancel && M5.BtnA.pressedFor(3000)) {
+      displayHomeScreen();
+      while (M5.BtnA.isPressed()) { M5.update(); delay(50); }
+      return 2;
+    }
+    delay(100);
+  }
+  return isPM;
+}
+
+void pahub_select(uint8_t channel) {
+  // channel: 0..5 (PaHub v2.1 has 6 channels)
+  if (channel > 5) return;
+  uint8_t mask = (1 << channel); // e.g. channel 2 -> 0x04
+  Wire.beginTransmission(PAHUB_ADDR);
+  Wire.write(mask);
+  Wire.endTransmission();
+}
+
+void pahub_selectoff(uint8_t channel) {
+  // channel: 0..5 (PaHub v2.1 has 6 channels)
+  if (channel > 5) return;
+  //uint8_t mask = (0 << channel); // e.g. channel 2 -> 0x04
+  Wire.beginTransmission(PAHUB_ADDR);
+  Wire.write(0x00);
+  Wire.endTransmission(); 
 }

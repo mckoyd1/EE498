@@ -19,8 +19,7 @@ const char* blynkServer = "blynk.cloud"; // Or your custom Blynk server if self-
 
 
 //WiFi credentials
- char ssid[] = "DMCKOY2.4";
-char pass[] = "degan020304";  
+
 
  /*char ssid[] = "UNLV-PSK";
 char pass[] = "XTq7c94pcu"; 
